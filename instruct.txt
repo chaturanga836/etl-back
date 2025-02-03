@@ -1,0 +1,9 @@
+create virtual environment - python -m venv [name]
+active virtual environment - [name]\Scripts\activate.bat  ( in our project env\Scripts\activate.bat)
+deactivate virtual environment 
+
+install fastapi -  pip install "fastapi[standard]"
+
+alembic
+
+create migration - alembic revision -m "create workspace_template table"
