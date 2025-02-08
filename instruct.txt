@@ -7,3 +7,7 @@ install fastapi -  pip install "fastapi[standard]"
 alembic
 
 create migration - alembic revision -m "create workspace_template table"
+
+run app : uvicorn main:app --reload
+
+copilot session : https://copilot.microsoft.com/chats/A91cELSjp2xCXgfZwXGN6
