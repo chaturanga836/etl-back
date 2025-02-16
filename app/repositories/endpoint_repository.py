@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.models.endpoint import Endpoint  # Import Endpoint from endpoint
+from app.models.connection import Endpoint  # Import Endpoint from endpoint
 
 class EndpointRepository:
 

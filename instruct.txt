@@ -11,3 +11,5 @@ create migration - alembic revision -m "create workspace_template table"
 run app : uvicorn main:app --reload
 
 copilot session : https://copilot.microsoft.com/chats/A91cELSjp2xCXgfZwXGN6
+
+Re-generate from existing table : alembic revision --autogenerate -m "Autogenerate migration from existing tables"

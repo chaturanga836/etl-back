@@ -1,60 +1,66 @@
 import logging
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException  # Import HTTPException from fastapi
+from fastapi import HTTPException
 from app.repositories.endpoint_repository import EndpointRepository
-from app.repositories.baseurl_repository import BaseURLRepository
-from app.repositories.api_response_repository import ApiResponseRepository  # Import the new repository
-import httpx
+from app.repositories.api_response_repository import ApiResponseRepository
+from app.utils.http_client import HTTPClient  # Import new HTTPClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ETLService:
-
     @staticmethod
     async def add_endpoint(db: AsyncSession, name: str, path: str, method: str, query_params: dict, body_params: dict, base_url: str):
-        base_url_entry = await BaseURLRepository.get_or_create_base_url(db, base_url)
-        return await EndpointRepository.add_endpoint(db, name, path, method, query_params, body_params, base_url_entry.id)
+        """Registers an API endpoint for extraction."""
+        return await EndpointRepository.add_endpoint(db, name, path, method, query_params, body_params, base_url)
 
     @staticmethod
     async def extract_data(db: AsyncSession, name: str):
-        logger.info(f"Extracting data for endpoint: {name}")
-
+        """Extracts data from an API endpoint."""
         endpoint = await EndpointRepository.get_endpoint_by_name(db, name)
         if not endpoint:
             logger.error(f"Endpoint not found: {name}")
             raise HTTPException(status_code=404, detail="Endpoint not found")
 
-        logger.info(f"Found endpoint: {endpoint}")
-
-        # Explicitly load the base_url relationship within the asynchronous context
-        await db.refresh(endpoint, attribute_names=['base_url'])
-        logger.info(f"Loaded base_url for endpoint: {endpoint.base_url}")
-
-        # Log the query_params to check their values
-        logger.info(f"Query Params: {endpoint.query_params}")
-
+        await db.refresh(endpoint, attribute_names=['base_url'])  # Load base_url relation
         url = endpoint.base_url.base_url + endpoint.path
-        logger.info(f"Constructed URL: {url}")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.request(method=endpoint.method, url=url, params=endpoint.query_params, json=endpoint.body_params)
-            logger.info(f"Received response with status code: {response.status_code}")
+        logger.info(f"Fetching data from: {url}")
+        response_data, status_code, headers = await HTTPClient.fetch(url, endpoint.method, endpoint.query_params, endpoint.body_params)
 
-        # Try to parse the response as JSON
-        try:
-            response_data = response.json()
-        except ValueError:
-            logger.error("Failed to decode JSON response")
-            response_data = {"error": "Failed to decode JSON response", "content": response.text}
+        # Save API response
+        await ApiResponseRepository.save_api_response(db, name, response_data, status_code, headers)
 
-        # Save the API response to the database, including headers and status code
-        await ApiResponseRepository.save_api_response(db, name, response_data, response.status_code, dict(response.headers))
+        if status_code != 200:
+            raise HTTPException(status_code=status_code, detail="Failed to extract data")
 
-        if response.status_code != 200:
-            logger.error(f"Failed to extract data, status code: {response.status_code}")
-            raise HTTPException(status_code=response.status_code, detail="Failed to extract data")
-
-        logger.info("Data extracted and saved successfully")
         return response_data
+
+    @staticmethod
+    async def transform_data(data: dict):
+        """Applies data transformations (modify as needed)."""
+        transformed_data = {k.lower(): v for k, v in data.items()}  # Example transformation
+        return transformed_data
+
+    @staticmethod
+    async def load_data(db: AsyncSession, name: str, transformed_data: dict):
+        """Loads transformed data into the database."""
+        logger.info(f"Loading transformed data for {name}")
+        await ApiResponseRepository.save_api_response(db, name, transformed_data, 200, {})  # Save transformed data
+
+    @staticmethod
+    async def process_etl(db: AsyncSession, name: str):
+        """Runs the full ETL process for a single endpoint."""
+        extracted_data = await ETLService.extract_data(db, name)
+        transformed_data = await ETLService.transform_data(extracted_data)
+        await ETLService.load_data(db, name, transformed_data)
+        return {"message": "ETL process completed", "data": transformed_data}
+
+    @staticmethod
+    async def process_multiple_etl(db: AsyncSession, names: list):
+        """Processes ETL for multiple endpoints in parallel."""
+        tasks = [ETLService.process_etl(db, name) for name in names]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return results
